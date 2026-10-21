@@ -287,7 +287,7 @@ function startRec(mode) {
   r.onresult = e => {
     retries = 0;
     let txt = '', fin = false;
-    for (let i = 0; i < e.results.length; i++) {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
       const result = e.results[i];
       if (result && result[0]) {
         txt += ' ' + result[0].transcript;
@@ -308,10 +308,20 @@ function startRec(mode) {
     if (fin && txt && !sent) { sent = true; endCommand(); send(txt, 'voce'); }
   };
   r.onerror = e => {
+    const errors = {
+      'not-allowed': 'Permesso microfono/riconoscimento negato. Consenti il microfono nelle impostazioni del sito.',
+      'service-not-allowed': 'Il browser ha bloccato il servizio di riconoscimento vocale. Prova Chrome o Microsoft Edge.',
+      'network': 'Il servizio di trascrizione vocale non è raggiungibile. Prova Chrome o Edge e verifica la connessione.',
+      'audio-capture': 'Microfono non disponibile. Controlla che Windows stia usando il microfono corretto.',
+      'no-speech': 'Non ho sentito parole. Avvicinati al microfono e riprova.',
+      'aborted': ''
+    };
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      stopRec(); if (st.armed) disarm(); warn('Riconoscimento vocale non autorizzato dal browser o dal sistema.');
-    } else if (e.error === 'network') warn('Il riconoscimento vocale richiede una connessione al servizio del browser.');
-    else if (e.error === 'audio-capture') warn('Microfono non disponibile per il riconoscimento vocale.');
+      if (rec === r) { rec = null; }
+      if (st.armed) disarm();
+    }
+    if (errors[e.error]) { if (errors[e.error]) warn(errors[e.error]); }
+    else warn('Errore riconoscimento vocale: ' + e.error + '.');
   };
   r.onend = () => {
     if (rec !== r) return; rec = null;
