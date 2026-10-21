@@ -1,1 +1,28 @@
 
+{
+  "id": "/",
+  "name": "Jarvis AI",
+  "short_name": "Jarvis",
+  "description": "Il tuo assistente AI vocale",
+  "lang": "it-IT",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#02030a",
+  "theme_color": "#02030a",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
