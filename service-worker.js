@@ -1,4 +1,3 @@
-
 "use strict";
 
 self.addEventListener("push", (event) => {
