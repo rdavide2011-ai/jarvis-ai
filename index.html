@@ -1,0 +1,114 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b14">
+<title>Jarvis AI</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at top,#14294b,#070b14 70%);color:#edf4ff;font-family:Arial,sans-serif;display:grid;place-items:center;padding:20px}
+main{width:100%;max-width:440px;text-align:center}
+.orb{width:145px;height:145px;margin:0 auto 28px;border:2px solid #58d9ff;border-radius:50%;display:grid;place-items:center;box-shadow:0 0 35px #168bff88;animation:pulse 3s infinite}
+.orb span{font-size:45px;color:#8deaff}
+@keyframes pulse{50%{box-shadow:0 0 55px #168bffaa}}
+h1{letter-spacing:6px;font-size:32px}
+p{color:#9bb0ce}
+.status{padding:14px;background:#0d1728;border:1px solid #243a5b;border-radius:12px;margin:25px 0}
+button{width:100%;padding:15px;margin:7px 0;border:1px solid #4baeff;border-radius:12px;background:#124b7c;color:white;font-size:15px;cursor:pointer}
+button:disabled{opacity:.5}
+#message{font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<main>
+<div class="orb"><span>J</span></div>
+<h1>JARVIS AI</h1>
+<p>Il tuo assistente personale</p>
+<div class="status" id="status">Inizializzazione...</div>
+<button id="enable">Attiva notifiche push</button>
+<button id="test" disabled>Invia notifica di prova</button>
+<p id="message">Sistema in avvio.</p>
+</main>
+<script>
+"use strict";
+
+const VAPID_PUBLIC_KEY="BEerw_zOGMn7TBC13Ike0xTlXx09tCoLdeE8omauraJ362wgWvy3rhH_GQ6qJ6a1wO9sbqvV3X0W0OF_Hp8d8Uw";
+const SUPABASE_URL="https://razumirsnqxmakbpdldi.supabase.co";
+const SUPABASE_KEY="sb_publishable_R1cuHk3DVt-mC7FwE7djlA_faLKRj7z";
+
+const statusEl=document.getElementById("status");
+const messageEl=document.getElementById("message");
+const testButton=document.getElementById("test");
+
+function say(message){messageEl.textContent=message}
+
+function decodeKey(key){
+ const padding="=".repeat((4-key.length%4)%4);
+ const raw=atob((key+padding).replace(/-/g,"+").replace(/_/g,"/"));
+ return Uint8Array.from(raw,c=>c.charCodeAt(0));
+}
+
+async function registerWorker(){
+ if(!("serviceWorker" in navigator))throw Error("Browser non compatibile.");
+ return navigator.serviceWorker.register("/service-worker.js");
+}
+
+document.getElementById("enable").addEventListener("click",async()=>{
+ try{
+  if(!("Notification" in window)||!("PushManager" in window))throw Error("Notifiche non supportate.");
+  if(!window.isSecureContext)throw Error("È necessaria una connessione HTTPS.");
+  const registration=await registerWorker();
+  const permission=await Notification.requestPermission();
+  if(permission!=="granted")throw Error("Permesso notifiche negato.");
+  let subscription=await registration.pushManager.getSubscription();
+  if(!subscription){
+   subscription=await registration.pushManager.subscribe({
+    userVisibleOnly:true,
+    applicationServerKey:decodeKey(VAPID_PUBLIC_KEY)
+   });
+  }
+  testButton.disabled=false;
+  statusEl.textContent="Notifiche attive";
+  say("Notifiche abilitate su questo dispositivo.");
+ }catch(error){
+  statusEl.textContent="Configurazione incompleta";
+  say(error.message||"Errore nell'attivazione.");
+ }
+});
+
+testButton.addEventListener("click",async()=>{
+ testButton.disabled=true;
+ try{
+  const registration=await registerWorker();
+  const subscription=await registration.pushManager.getSubscription();
+  if(!subscription)throw Error("Attiva prima le notifiche.");
+  const response=await fetch(SUPABASE_URL+"/functions/v1/jarvis-push-test",{
+   method:"POST",
+   headers:{"Content-Type":"application/json","apikey":SUPABASE_KEY},
+   body:JSON.stringify({subscription:subscription.toJSON()})
+  });
+  const result=await response.json();
+  if(!response.ok)throw Error(result.error||"Errore del server.");
+  say("Richiesta di notifica inviata.");
+ }catch(error){
+  say(error.message||"Invio non riuscito.");
+ }finally{
+  testButton.disabled=false;
+ }
+});
+
+(async()=>{
+ try{
+  await registerWorker();
+  statusEl.textContent="Jarvis AI online";
+  say("Sistema pronto.");
+ }catch(error){
+  statusEl.textContent="Service worker non trovato";
+  say("Completeremo la configurazione delle notifiche nel prossimo passaggio.");
+ }
+})();
+</script>
+</body>
+</html>
