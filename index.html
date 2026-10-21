@@ -1,0 +1,219 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#070b14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Jarvis AI">
+  <title>Jarvis AI</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; color: #edf4ff;
+      background: radial-gradient(ellipse at top, #14294b, #070b14 65%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex; justify-content: center; align-items: center;
+      padding: 22px;
+    }
+    main { width: 100%; max-width: 440px; text-align: center; }
+    .orb {
+      width: 150px; height: 150px; margin: 0 auto 28px;
+      border-radius: 50%; border: 2px solid #58d9ff;
+      box-shadow: 0 0 24px #168bff88, inset 0 0 30px #168bff55;
+      display: grid; place-items: center; position: relative;
+      animation: pulse 3s ease-in-out infinite;
+    }
+    .orb::before {
+      content: ""; position: absolute; inset: 12px;
+      border: 1px solid #9e8bff; border-radius: 50%;
+    }
+    .orb span { font-size: 38px; font-weight: 300; color: #8deaff; }
+    @keyframes pulse {
+      50% { box-shadow: 0 0 42px #168bffaa, inset 0 0 42px #168bff77; }
+    }
+    h1 { font-size: 34px; letter-spacing: 5px; margin: 0; }
+    .sub { color: #8da5c8; margin: 12px 0 26px; }
+    .status {
+      border: 1px solid #243a5b; background: #0d1728;
+      padding: 14px; border-radius: 12px; margin-bottom: 16px;
+      color: #b8c9e4; font-size: 14px;
+    }
+    .dot {
+      display: inline-block; width: 8px; height: 8px;
+      background: #ffbd4a; border-radius: 50%; margin-right: 8px;
+    }
+    button {
+      width: 100%; padding: 15px; margin: 7px 0;
+      border: 1px solid #4baeff; border-radius: 12px;
+      background: linear-gradient(100deg, #123e70, #155e8b);
+      color: white; font-size: 15px; font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #111c2d; border-color: #304563; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #message {
+      min-height: 44px; margin-top: 15px; color: #a9c4e7;
+      font-size: 14px; line-height: 1.5; overflow-wrap: anywhere;
+    }
+    .foot { color: #617897; font-size: 12px; margin-top: 24px; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="orb"><span>J</span></div>
+  <h1>JARVIS AI</h1>
+  <p class="sub">Il tuo assistente personale</p>
+
+  <div class="status">
+    <span class="dot" id="dot"></span>
+    <span id="status">Controllo del sistema...</span>
+  </div>
+
+  <button id="enable">Attiva notifiche push</button>
+  <button id="test" class="secondary" disabled>Invia notifica di prova</button>
+
+  <div id="message" role="status" aria-live="polite">
+    Inizializzazione...
+  </div>
+  <p class="foot">JARVIS AI · Personal Assistant</p>
+</main>
+
+<script>
+"use strict";
+
+// Chiave pubblica VAPID già utilizzata nel progetto precedente.
+const VAPID_PUBLIC_KEY =
+  "BEerw_zOGMn7TBC13Ike0xTlXx09tCoLdeE8omauraJ362wgWvy3rhH_GQ6qJ6a1wO9sbqvV3X0W0OF_Hp8d8Uw";
+
+const SUPABASE_URL = "https://razumirsnqxmakbpdldi.supabase.co";
+const PUSH_FUNCTION = `${SUPABASE_URL}/functions/v1/jarvis-push-test`;
+
+// Inserisci qui la chiave publishable del NUOVO progetto Supabase Jarvis.
+const SUPABASE_PUBLISHABLE_KEY = "INSERISCI_QUI_LA_CHIAVE_PUBLISHABLE_DI_JARVIS";
+
+const $ = id => document.getElementById(id);
+let currentSubscription = null;
+
+function showMessage(text) {
+  $("message").textContent = text;
+}
+
+function setStatus(text, color = "#ffbd4a") {
+  $("status").textContent = text;
+  $("dot").style.background = color;
+}
+
+function base64ToBytes(base64) {
+  const padding = "=".repeat((4 - base64.length % 4) % 4);
+  const raw = atob((base64 + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    throw new Error("Questo browser non supporta i service worker.");
+  }
+  return navigator.serviceWorker.register("/service-worker.js");
+}
+
+async function enableNotifications() {
+  $("enable").disabled = true;
+
+  try {
+    if (!("Notification" in window) || !("PushManager" in window)) {
+      throw new Error("Notifiche push non supportate da questo browser.");
+    }
+
+    if (!window.isSecureContext) {
+      throw new Error("Apri Jarvis tramite HTTPS.");
+    }
+
+    const registration = await registerServiceWorker();
+    const permission = await Notification.requestPermission();
+
+    if (permission !== "granted") {
+      throw new Error("Permesso notifiche non concesso. Controlla le impostazioni del browser.");
+    }
+
+    let subscription = await registration.pushManager.getSubscription();
+
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64ToBytes(VAPID_PUBLIC_KEY)
+      });
+    }
+
+    currentSubscription = subscription;
+    $("test").disabled = false;
+    setStatus("Notifiche attive", "#48e6a0");
+    showMessage("Notifiche abilitate su questo dispositivo. Ora puoi inviare una prova.");
+  } catch (error) {
+    showMessage(error.message || "Errore durante l'attivazione delle notifiche.");
+    setStatus("Configurazione incompleta");
+  } finally {
+    $("enable").disabled = false;
+  }
+}
+
+async function sendTestNotification() {
+  $("test").disabled = true;
+
+  try {
+    if (!currentSubscription) {
+      const registration = await registerServiceWorker();
+      currentSubscription = await registration.pushManager.getSubscription();
+    }
+
+    if (!currentSubscription) {
+      throw new Error("Attiva prima le notifiche push.");
+    }
+
+    if (SUPABASE_PUBLISHABLE_KEY.startsWith("INSERISCI_QUI")) {
+      throw new Error("Manca la chiave publishable di Jarvis: inseriscila nel codice.");
+    }
+
+    const response = await fetch(PUSH_FUNCTION, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_PUBLISHABLE_KEY
+      },
+      body: JSON.stringify({
+        subscription: currentSubscription.toJSON()
+      })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || `Errore del server (${response.status}).`);
+    }
+
+    showMessage("Richiesta inviata. Controlla se è arrivata la notifica sul dispositivo.");
+  } catch (error) {
+    showMessage(error.message || "Impossibile inviare la notifica.");
+  } finally {
+    $("test").disabled = false;
+  }
+}
+
+$("enable").addEventListener("click", enableNotifications);
+$("test").addEventListener("click", sendTestNotification);
+
+(async () => {
+  try {
+    await registerServiceWorker();
+    setStatus("Backend da verificare", "#48e6a0");
+    showMessage("Jarvis è pronto per configurare le notifiche push.");
+  } catch (error) {
+    setStatus("Service worker non disponibile");
+    showMessage(error.message || "Impossibile inizializzare il sistema.");
+  }
+})();
+</script>
+</body>
+</html>
