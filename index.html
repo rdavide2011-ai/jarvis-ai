@@ -269,10 +269,10 @@ function analyse(now) {
 }
 
 /* ---------- Riconoscimento vocale ---------- */
-const WAKE = /\b(?:ehi|hey|ei|ehy)\s+(?:jarvis|giarvis|garvis|jarvys)\b/;
-const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ');
+const WAKE = /\b(?:ehi|hey|ei|ehy|i|hi|e)\s*(?:jarvis|giarvis|garvis|jarvys|jarvis\s+ai)\b/;
+const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 let rec = null, recMode = null, retries = 0, restartT = 0, cmdT = 0;
-const MAX_RETRIES = 6;
+
 
 function stopRec() {
   clearTimeout(restartT);
@@ -281,15 +281,30 @@ function stopRec() {
 function startRec(mode) {
   if (!SR) return;
   stopRec(); recMode = mode;
-  const r = new SR(); r.lang = 'it-IT'; r.continuous = mode === 'wake'; r.interimResults = true; r.maxAlternatives = 1;
-  let t0 = 0, last = '', sent = false;
+  const r = new SR(); r.lang = 'it-IT'; r.continuous = false; r.interimResults = true; r.maxAlternatives = 3;
+  let t0 = 0, last = '', sent = false, wakeBuffer = '';
   r.onstart = () => { t0 = Date.now(); };
   r.onresult = e => {
-    retries = 0; let txt = '', fin = false;
-    for (let i = e.resultIndex; i < e.results.length; i++) { txt += e.results[i][0].transcript; if (e.results[i].isFinal) fin = true; }
-    txt = txt.trim();
-    if (mode === 'wake') { if (WAKE.test(norm(txt))) activate('voce'); return; }
-    last = txt; el.heard.textContent = txt || '…';
+    retries = 0;
+    let txt = '', fin = false;
+    for (let i = 0; i < e.results.length; i++) {
+      const result = e.results[i];
+      if (result && result[0]) {
+        txt += ' ' + result[0].transcript;
+        if (result.isFinal) fin = true;
+      }
+    }
+    txt = norm(txt);
+    if (mode === 'wake') {
+      wakeBuffer = norm(wakeBuffer + ' ' + txt).slice(-180);
+      if (WAKE.test(txt) || WAKE.test(wakeBuffer) || /\bjarvis\b/.test(txt) && /\b(?:ehi|hey|ei|ehy|i|hi|e)\b/.test(wakeBuffer)) {
+        wakeBuffer = '';
+        activate('voce');
+      }
+      return;
+    }
+    last = txt;
+    el.heard.textContent = txt || '…';
     if (fin && txt && !sent) { sent = true; endCommand(); send(txt, 'voce'); }
   };
   r.onerror = e => {
@@ -305,10 +320,12 @@ function startRec(mode) {
       if (last && !sent) { sent = true; endCommand(); send(last, 'voce'); } else endCommand('Nessun comando rilevato.');
       return;
     }
-    if (st.mode !== 'wake' || !st.armed || !cfg.wakeVoice) return;
-    if (Date.now() - t0 > 4000) retries = 0;
-    if (++retries > MAX_RETRIES) { warn('Riconoscimento «Ehi Jarvis» interrotto dal browser. Usa i clap o «Parla ora», oppure riattiva il microfono.'); return; }
-    restartT = setTimeout(() => { if (st.mode === 'wake' && st.armed && !st.speaking) startRec('wake'); }, Math.min(250 * retries * retries, 4000));
+    if (st.mode !== 'wake' || !st.armed || !cfg.wakeVoice || st.speaking) return;
+    if (Date.now() - t0 > 2500) retries = 0;
+    retries = Math.min(retries + 1, 12);
+    restartT = setTimeout(() => {
+      if (st.mode === 'wake' && st.armed && !st.speaking && !document.hidden) startRec('wake');
+    }, Math.min(350 + retries * 180, 2200));
   };
   rec = r;
   try { r.start(); } catch (e) { rec = null; warn('Impossibile avviare il riconoscimento vocale.'); }
@@ -352,14 +369,27 @@ function disarm() {
 
 /* ---------- Sintesi vocale ---------- */
 let voices = [];
+function voiceScore(v) {
+  const name = (v.name + ' ' + v.voiceURI).toLowerCase();
+  let score = /^it[-_]/i.test(v.lang) ? 30 : 0;
+  if (/natural|neural|online|enhanced|premium/.test(name)) score += 80;
+  if (/google.*ital|ital.*google/.test(name)) score += 65;
+  if (/elsa|diego|isabella|federica|francesca|paola|lucia/.test(name)) score += 35;
+  if (/microsoft/.test(name)) score += 15;
+  if (/compact|legacy|robot/.test(name)) score -= 30;
+  if (v.default) score += 3;
+  return score;
+}
 function loadVoices() {
   if (!hasTTS) return;
-  voices = speechSynthesis.getVoices().filter(v => /^it/i.test(v.lang));
+  const all = speechSynthesis.getVoices();
+  voices = all.filter(v => /^it[-_]/i.test(v.lang)).sort((a, b) => voiceScore(b) - voiceScore(a));
   const s = $('#sVoice'); s.textContent = '';
   const add = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; s.appendChild(o); };
-  add('', voices.length ? 'Predefinita (italiano)' : 'Nessuna voce italiana: voce di sistema');
-  voices.forEach(v => add(v.voiceURI, v.name + ' (' + v.lang + ')'));
-  s.value = cfg.voiceURI;
+  add('', voices.length ? 'Migliore voce italiana disponibile' : 'Voce predefinita del dispositivo');
+  voices.forEach(v => add(v.voiceURI, v.name + ' (' + v.lang + ')' + (/natural|neural|online|enhanced|premium/i.test(v.name + ' ' + v.voiceURI) ? ' · naturale' : '')));
+  if (cfg.voiceURI && voices.some(v => v.voiceURI === cfg.voiceURI)) s.value = cfg.voiceURI;
+  else { cfg.voiceURI = ''; s.value = ''; }
 }
 if (hasTTS) { loadVoices(); speechSynthesis.addEventListener('voiceschanged', loadVoices); }
 
@@ -368,8 +398,9 @@ function speak(text) {
   if (!hasTTS) { warn('Sintesi vocale non supportata: leggi la risposta nella cronologia.'); resumeWake(); return; }
   speechSynthesis.cancel(); stopRec(); clearTimeout(cmdT);
   const token = ++speakToken, u = new SpeechSynthesisUtterance(text);
-  u.lang = 'it-IT'; u.rate = +cfg.rate || 1;
-  const v = voices.find(x => x.voiceURI === cfg.voiceURI) || voices[0]; if (v) u.voice = v;
+  u.lang = 'it-IT'; u.rate = +cfg.rate || 0.96; u.pitch = 1.02; u.volume = 1;
+  const v = voices.find(x => x.voiceURI === cfg.voiceURI) || voices[0];
+  if (v) { u.voice = v; u.lang = v.lang || 'it-IT'; }
   const done = () => { if (token !== speakToken) return; st.speaking = false; el.btnStop.disabled = true; setTimeout(() => { if (st.mode === 'speak' || st.mode === 'off' || st.mode === 'wake') resumeWake(); }, 350); };
   u.onstart = () => { if (token !== speakToken) return; st.speaking = true; setMode('speak'); };
   u.onboundary = () => { st.pulse = 1; };   // impulso a ogni parola: sincronizzazione approssimata (l'audio TTS non è accessibile)
