@@ -1,1 +1,561 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Jarvis AI</title>
+<meta name="description" content="Jarvis AI – interfaccia vocale con nucleo olografico animato">
+<meta name="theme-color" content="#02030a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<!--
+  NOTE SUL PROGETTO
+  - I file del repository ricevuti (manifest, vercel.json, service-worker, README) risultavano vuoti:
+    non esiste alcun backend o endpoint verificabile, quindi NESSUN endpoint è stato inventato.
+  - Senza backend, Jarvis risponde solo con pochi comandi locali (ora, data, aiuto), etichettati "locale".
+  - In Impostazioni puoi indicare un tuo endpoint HTTPS. Contratto atteso (da implementare lato server):
+      POST {message, history:[{role,content}], lang:"it-IT"}  ->  JSON {reply:"testo"}
+    Nessuna chiave API va inserita in questo file.
+-->
+<style>
+:root{--h:218;--a:hsl(var(--h) 100% 62%);--bg:#02030a;--panel:rgba(10,14,34,.72);--line:rgba(120,160,255,.22);--tx:#e8f0ff;--mut:#9fb0d6}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{background:
+  radial-gradient(60% 50% at 20% 0%,rgba(80,60,255,.18),transparent 70%),
+  radial-gradient(50% 45% at 90% 30%,rgba(255,60,220,.12),transparent 70%),
+  radial-gradient(60% 50% at 40% 100%,rgba(0,220,255,.12),transparent 70%),var(--bg);
+  background-attachment:fixed;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.35;
+  background:linear-gradient(rgba(90,130,255,.07) 1px,transparent 1px) 0 0/48px 48px,linear-gradient(90deg,rgba(90,130,255,.07) 1px,transparent 1px) 0 0/48px 48px;
+  -webkit-mask:radial-gradient(70% 60% at 50% 40%,#000,transparent);mask:radial-gradient(70% 60% at 50% 40%,#000,transparent)}
+.app{position:relative;display:grid;gap:14px;padding:14px;max-width:1280px;margin:0 auto;grid-template-columns:1fr;min-height:100dvh}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+.brand img{width:40px;height:40px;border-radius:50%;box-shadow:0 0 18px hsl(var(--h) 100% 60%/.55)}
+.brand b{letter-spacing:.38em;font-weight:300;font-size:1.25rem}
+.brand small{display:block;color:var(--mut);letter-spacing:.12em;font-size:.68rem;text-transform:uppercase}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line);border-radius:99px;background:var(--panel);font-size:.8rem;color:var(--tx)}
+.pill i{width:9px;height:9px;border-radius:50%;background:#6b7599;box-shadow:0 0 0 0 transparent}
+.pill[data-s=ok] i{background:#2dff9a;box-shadow:0 0 10px #2dff9a}
+.pill[data-s=on] i{background:var(--a);box-shadow:0 0 10px var(--a)}
+.pill[data-s=err] i{background:#ff4d6d;box-shadow:0 0 10px #ff4d6d}
+.stage{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.core-wrap{position:relative;width:min(80vw,50dvh,540px);aspect-ratio:1}
+#core{position:absolute;inset:0;width:100%;height:100%}
+#logo{position:absolute;left:50%;top:50%;width:33%;aspect-ratio:1;border-radius:50%;transform:translate(-50%,-50%);object-fit:cover;
+  box-shadow:0 0 40px hsl(var(--h) 100% 60%/.6),inset 0 0 20px rgba(0,0,0,.6);will-change:transform,filter;pointer-events:none}
+.flash #logo{animation:fl .6s ease-out}
+@keyframes fl{0%{filter:brightness(2.2) saturate(1.5)}100%{filter:none}}
+h1{margin:0;font-size:clamp(1.1rem,3.2vw,1.6rem);font-weight:300;letter-spacing:.42em;padding-left:.42em;color:var(--a);text-shadow:0 0 18px hsl(var(--h) 100% 60%/.7)}
+#note{margin:0;color:var(--mut);font-size:.88rem;max-width:46ch;min-height:2.6em}
+.meter{width:min(340px,80vw);height:8px;border-radius:9px;background:rgba(120,160,255,.14);overflow:hidden;border:1px solid var(--line)}
+.meter span{display:block;height:100%;width:100%;transform-origin:left;transform:scaleX(0);background:linear-gradient(90deg,#2b6bff,#22e5ff,#c04bff,#ff3df2)}
+.meter-l{font-size:.72rem;color:var(--mut);letter-spacing:.1em;text-transform:uppercase}
+.cap{width:min(560px,100%);display:grid;gap:4px;font-size:.92rem;text-align:left;min-height:3.4em}
+.cap p{margin:0;overflow-wrap:anywhere}.cap b{color:var(--a);font-weight:600;margin-right:6px;font-size:.78rem;letter-spacing:.12em;text-transform:uppercase}
+.ctrl{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.btn{font:inherit;color:var(--tx);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:11px 18px;cursor:pointer;min-height:44px;
+  transition:transform .15s,box-shadow .2s,border-color .2s,background .2s}
+.btn:hover{border-color:var(--a);box-shadow:0 0 18px hsl(var(--h) 100% 60%/.35);transform:translateY(-1px)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:linear-gradient(135deg,rgba(43,107,255,.55),rgba(192,75,255,.55));border-color:rgba(160,180,255,.5)}
+.btn[aria-pressed=true]{border-color:#2dff9a;box-shadow:0 0 16px rgba(45,255,154,.35)}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.chat{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:20px;background:var(--panel);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);overflow:hidden;min-height:300px}
+.chat h2{margin:0;padding:12px 16px;font-size:.78rem;letter-spacing:.2em;text-transform:uppercase;color:var(--mut);border-bottom:1px solid var(--line);font-weight:500}
+#log{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px;max-height:40dvh;scroll-behavior:smooth}
+.msg{max-width:88%;padding:9px 13px;border-radius:14px;border:1px solid var(--line);overflow-wrap:anywhere;animation:in .35s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(8px)}}
+.msg small{display:block;font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin-bottom:2px}
+.msg.u{align-self:flex-end;background:rgba(43,107,255,.22)}
+.msg.j{align-self:flex-start;background:rgba(192,75,255,.16)}
+.msg.s{align-self:center;color:var(--mut);font-size:.82rem;border-style:dashed;background:none}
+form.in{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
+form.in input{flex:1;min-width:0;font:inherit;color:var(--tx);background:rgba(0,0,0,.4);border:1px solid var(--line);border-radius:12px;padding:11px 14px}
+dialog{color:var(--tx);background:#080b1c;border:1px solid var(--line);border-radius:20px;padding:0;width:min(480px,94vw);box-shadow:0 0 60px rgba(90,80,255,.35)}
+dialog::backdrop{background:rgba(0,0,5,.7);backdrop-filter:blur(4px)}
+dialog form{padding:20px;display:grid;gap:14px}
+dialog h2{margin:0;font-weight:300;letter-spacing:.25em;font-size:1rem}
+dialog label{display:grid;gap:5px;font-size:.88rem}
+dialog label.chk{display:flex;align-items:center;gap:10px}
+dialog input[type=text],dialog input[type=url],dialog select{font:inherit;color:var(--tx);background:rgba(0,0,0,.45);border:1px solid var(--line);border-radius:10px;padding:9px 11px;width:100%}
+dialog input[type=checkbox]{width:20px;height:20px;accent-color:#7a5cff}
+dialog input[type=range]{accent-color:#22e5ff}
+dialog small{color:var(--mut)}
+.sup{font-size:.8rem;color:var(--mut);border-top:1px solid var(--line);padding-top:10px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@media(min-width:960px){
+  .app{grid-template-columns:1fr 420px;grid-template-rows:auto 1fr;height:100dvh;min-height:0;padding:20px}
+  header{grid-column:1/-1}.chat{min-height:0}#log{max-height:none}
+  .stage{justify-content:center}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<main class="app">
+  <header>
+    <div class="brand"><img src="icon-192.png" alt="" width="40" height="40"><div><b>JARVIS</b><small>Assistente vocale</small></div></div>
+    <span class="pill" id="micPill" data-s="off"><i></i><span>Microfono disattivato</span></span>
+    <span class="pill" id="bePill" data-s="off"><i></i><span>Backend AI non configurato</span></span>
+    <button class="btn" id="btnSet" type="button" aria-haspopup="dialog">Impostazioni</button>
+  </header>
 
+  <section class="stage" aria-label="Jarvis">
+    <div class="core-wrap" id="coreWrap">
+      <canvas id="core" aria-hidden="true"></canvas>
+      <img id="logo" src="icon-512.png" alt="Logo Jarvis">
+    </div>
+    <h1 id="state" role="status" aria-live="polite">INATTIVO</h1>
+    <p id="note"></p>
+    <div class="meter-l" id="mlabel">Volume rilevato</div>
+    <div class="meter" role="meter" aria-labelledby="mlabel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="meter"><span id="mbar"></span></div>
+    <div class="cap" aria-live="polite">
+      <p><b>Tu</b><span id="heard">—</span></p>
+      <p><b>Jarvis</b><span id="said">—</span></p>
+    </div>
+    <div class="ctrl">
+      <button class="btn primary" id="btnMic" type="button" aria-pressed="false">Attiva microfono</button>
+      <button class="btn" id="btnTalk" type="button">Parla ora</button>
+      <button class="btn" id="btnStop" type="button" disabled>Interrompi voce</button>
+    </div>
+  </section>
+
+  <section class="chat" aria-label="Conversazione">
+    <h2>Cronologia</h2>
+    <div id="log" role="log" aria-live="polite"></div>
+    <form class="in" id="form" autocomplete="off">
+      <label class="sr" for="txt">Scrivi un messaggio</label>
+      <input id="txt" type="text" placeholder="Scrivi a Jarvis e premi Invio…" enterkeyhint="send">
+      <button class="btn primary" type="submit">Invia</button>
+    </form>
+  </section>
+</main>
+
+<dialog id="dlg" aria-labelledby="dlgT">
+  <form method="dialog" id="setForm">
+    <h2 id="dlgT">IMPOSTAZIONI</h2>
+    <label class="chk"><input type="checkbox" id="cVoice"> Attivazione con «Ehi Jarvis»</label>
+    <label class="chk"><input type="checkbox" id="cClap"> Attivazione con due battiti di mani</label>
+    <label>Sensibilità clap: <output id="oSens"></output>
+      <input type="range" id="rSens" min="1" max="10" step="1"><small>Più alta = rileva battiti più deboli (più falsi positivi).</small></label>
+    <label>Voce di Jarvis<select id="sVoice"></select></label>
+    <label>Velocità voce: <output id="oRate"></output><input type="range" id="rRate" min="0.7" max="1.4" step="0.05"></label>
+    <label>Endpoint backend AI (opzionale, HTTPS)
+      <input type="url" id="iEnd" placeholder="https://tuo-dominio/api/chat" inputmode="url">
+      <small>Se vuoto, Jarvis usa solo comandi locali (ora, data, aiuto). Riceve POST JSON {message, history, lang} e deve rispondere {reply}.</small></label>
+    <div class="sup" id="sup"></div>
+    <button class="btn primary" value="close" type="submit">Chiudi</button>
+  </form>
+</dialog>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const AC = window.AudioContext || window.webkitAudioContext;
+const hasMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && AC);
+const hasTTS = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const TAU = Math.PI * 2;
+
+/* ---------- Configurazione (localStorage, se disponibile) ---------- */
+const cfg = { wakeVoice: true, wakeClap: true, sens: 6, voiceURI: '', rate: 1, endpoint: '' };
+try { Object.assign(cfg, JSON.parse(localStorage.getItem('jarvis-cfg') || '{}')); } catch (e) {}
+const saveCfg = () => { try { localStorage.setItem('jarvis-cfg', JSON.stringify(cfg)); } catch (e) {} };
+
+/* ---------- Stato ---------- */
+// mode: off | wake (attesa attivazione) | listen (ascolto comando) | think | speak
+const st = { mode: 'off', armed: false, speaking: false, busy: false, mic: 0, pulse: 0, hearing: false, hist: [] };
+const TITLE = { off: 'INATTIVO', wake: 'IN ASCOLTO', listen: 'TI ASCOLTO', think: 'ELABORAZIONE', speak: 'STO PARLANDO' };
+const HUE = { off: 218, wake: 200, listen: 186, think: 268, speak: 310 };
+const ENERGY = { off: .16, wake: .3, listen: .62, think: .5, speak: .6 };
+
+const el = { state: $('#state'), note: $('#note'), heard: $('#heard'), said: $('#said'), log: $('#log'), txt: $('#txt'),
+  mic: $('#micPill'), be: $('#bePill'), btnMic: $('#btnMic'), btnTalk: $('#btnTalk'), btnStop: $('#btnStop'),
+  meter: $('#meter'), mbar: $('#mbar'), wrap: $('#coreWrap'), logo: $('#logo') };
+
+function pill(p, s, t) { p.dataset.s = s; p.lastElementChild.textContent = t; }
+function note(t) { el.note.textContent = t || ''; }
+
+function hint() {
+  const w = [];
+  if (cfg.wakeVoice && SR) w.push('di’ «Ehi Jarvis»');
+  if (cfg.wakeClap && hasMic) w.push('batti due volte le mani');
+  const base = w.length ? 'Per attivarmi ' + w.join(' oppure ') + '.' : 'Attivazione automatica disattivata: usa «Parla ora».';
+  return base + ' Funziona solo con questa pagina aperta e in primo piano.';
+}
+
+function setMode(m) {
+  st.mode = m; st.hearing = false;
+  refreshTitle();
+  const armedTxt = st.armed;
+  if (m === 'off') pill(el.mic, 'off', (!SR && !hasMic) ? 'Non supportato' : 'Microfono disattivato');
+  else if (m === 'listen') pill(el.mic, 'on', 'In ascolto del comando');
+  else if (m === 'wake') pill(el.mic, 'on', 'In attesa di attivazione');
+  else pill(el.mic, armedTxt ? 'on' : 'off', armedTxt ? 'Microfono attivo' : 'Microfono disattivato');
+  el.btnMic.textContent = st.armed ? 'Disattiva microfono' : 'Attiva microfono';
+  el.btnMic.setAttribute('aria-pressed', st.armed);
+  el.btnStop.disabled = !st.speaking;
+  if (m === 'wake') note(hint());
+  else if (m === 'off' && !el.note.dataset.keep) note(!SR && !hasMic ? 'Questo browser non supporta microfono né riconoscimento vocale: puoi comunque scrivere.' : 'Premi «Attiva microfono» per consentire l’accesso al microfono.');
+}
+function refreshTitle() { el.state.textContent = (st.mode === 'listen' && st.hearing) ? 'VOCE RILEVATA' : TITLE[st.mode]; }
+function warn(t) { note(t); el.note.dataset.keep = '1'; clearTimeout(warn.t); warn.t = setTimeout(() => { delete el.note.dataset.keep; if (st.mode === 'wake') note(hint()); }, 9000); }
+
+/* ---------- Chat ---------- */
+function addMsg(role, text, tag) {
+  const d = document.createElement('div'); d.className = 'msg ' + role;
+  if (role !== 's') { const s = document.createElement('small'); s.textContent = (role === 'u' ? 'Tu' : 'Jarvis') + (tag ? ' · ' + tag : ''); d.appendChild(s); }
+  d.appendChild(document.createTextNode(text));
+  el.log.appendChild(d); el.log.scrollTop = el.log.scrollHeight;
+  while (el.log.children.length > 200) el.log.removeChild(el.log.firstChild);
+}
+addMsg('s', 'Nessun modello AI collegato: finché non configuri un backend rispondo solo a «che ore sono», «che giorno è» e «aiuto».');
+
+/* ---------- Microfono e analisi audio ---------- */
+let stream = null, actx = null, volAn = null, clapAn = null, volBuf, clapBuf;
+async function startMic() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
+  } catch (e) {
+    const n = e && e.name;
+    warn(n === 'NotAllowedError' || n === 'SecurityError' ? 'Permesso microfono negato: abilitalo dalle impostazioni del browser e riprova.'
+      : n === 'NotFoundError' ? 'Nessun microfono trovato.' : 'Impossibile usare il microfono: ' + (e && e.message || n));
+    return false;
+  }
+  actx = new AC();
+  try { if (actx.state === 'suspended') await actx.resume(); } catch (e) {}
+  const src = actx.createMediaStreamSource(stream);
+  volAn = actx.createAnalyser(); volAn.fftSize = 512; src.connect(volAn);
+  const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1200; // i clap sono ricchi di alte frequenze, la voce meno
+  clapAn = actx.createAnalyser(); clapAn.fftSize = 1024; src.connect(hp); hp.connect(clapAn);
+  volBuf = new Float32Array(volAn.fftSize); clapBuf = new Float32Array(clapAn.fftSize);
+  stream.getAudioTracks()[0].addEventListener('ended', () => { if (st.armed) { disarm(); warn('Microfono scollegato.'); } });
+  return true;
+}
+function stopMic() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (actx) actx.close().catch(() => {});
+  stream = actx = volAn = clapAn = null; st.mic = 0;
+}
+
+/* Rilevamento due clap: picco su audio filtrato passa-alto, fronte di salita, soglia adattiva, finestra 120–700 ms */
+let bg = 0, prevP = 0, lastClap = 0, pending = false;
+function detectClap(now) {
+  clapAn.getFloatTimeDomainData(clapBuf);
+  let p = 0; for (let i = 0; i < clapBuf.length; i++) { const a = Math.abs(clapBuf[i]); if (a > p) p = a; }
+  const thr = Math.max(.55 - cfg.sens * .045, bg * 5);
+  if (p > thr && prevP < thr * .5 && now - lastClap > 120) {
+    if (pending && now - lastClap < 700) { pending = false; lastClap = 0; prevP = p; activate('clap'); return; }
+    pending = true; lastClap = now;
+  }
+  if (pending && now - lastClap > 700) pending = false;
+  bg = bg * .98 + Math.min(p, thr) * .02; prevP = p;
+}
+function analyse(now) {
+  let rms = 0;
+  if (volAn) { volAn.getFloatTimeDomainData(volBuf); let s = 0; for (let i = 0; i < volBuf.length; i++) s += volBuf[i] * volBuf[i]; rms = Math.sqrt(s / volBuf.length); }
+  st.mic += (Math.min(1, rms * 6) - st.mic) * .45;
+  if (cfg.wakeClap && clapAn && st.armed && !st.speaking && st.mode === 'wake') detectClap(now); else { pending = false; prevP = 0; }
+  if (st.mode === 'listen') { const h = st.mic > .1; if (h !== st.hearing) { st.hearing = h; refreshTitle(); } }
+}
+
+/* ---------- Riconoscimento vocale ---------- */
+const WAKE = /\b(?:ehi|hey|ei|ehy)\s+(?:jarvis|giarvis|garvis|jarvys)\b/;
+const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ');
+let rec = null, recMode = null, retries = 0, restartT = 0, cmdT = 0;
+const MAX_RETRIES = 6;
+
+function stopRec() {
+  clearTimeout(restartT);
+  if (rec) { const r = rec; rec = null; r.onend = r.onerror = r.onresult = r.onstart = null; try { r.abort(); } catch (e) {} }
+}
+function startRec(mode) {
+  if (!SR) return;
+  stopRec(); recMode = mode;
+  const r = new SR(); r.lang = 'it-IT'; r.continuous = mode === 'wake'; r.interimResults = true; r.maxAlternatives = 1;
+  let t0 = 0, last = '', sent = false;
+  r.onstart = () => { t0 = Date.now(); };
+  r.onresult = e => {
+    retries = 0; let txt = '', fin = false;
+    for (let i = e.resultIndex; i < e.results.length; i++) { txt += e.results[i][0].transcript; if (e.results[i].isFinal) fin = true; }
+    txt = txt.trim();
+    if (mode === 'wake') { if (WAKE.test(norm(txt))) activate('voce'); return; }
+    last = txt; el.heard.textContent = txt || '…';
+    if (fin && txt && !sent) { sent = true; endCommand(); send(txt, 'voce'); }
+  };
+  r.onerror = e => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      stopRec(); if (st.armed) disarm(); warn('Riconoscimento vocale non autorizzato dal browser o dal sistema.');
+    } else if (e.error === 'network') warn('Il riconoscimento vocale richiede una connessione al servizio del browser.');
+    else if (e.error === 'audio-capture') warn('Microfono non disponibile per il riconoscimento vocale.');
+  };
+  r.onend = () => {
+    if (rec !== r) return; rec = null;
+    if (mode === 'listen') {
+      if (st.mode !== 'listen') return;
+      if (last && !sent) { sent = true; endCommand(); send(last, 'voce'); } else endCommand('Nessun comando rilevato.');
+      return;
+    }
+    if (st.mode !== 'wake' || !st.armed || !cfg.wakeVoice) return;
+    if (Date.now() - t0 > 4000) retries = 0;
+    if (++retries > MAX_RETRIES) { warn('Riconoscimento «Ehi Jarvis» interrotto dal browser. Usa i clap o «Parla ora», oppure riattiva il microfono.'); return; }
+    restartT = setTimeout(() => { if (st.mode === 'wake' && st.armed && !st.speaking) startRec('wake'); }, Math.min(250 * retries * retries, 4000));
+  };
+  rec = r;
+  try { r.start(); } catch (e) { rec = null; warn('Impossibile avviare il riconoscimento vocale.'); }
+}
+
+function resumeWake() {
+  clearTimeout(cmdT); stopRec();
+  if (!st.armed) { setMode('off'); return; }
+  setMode('wake');
+  if (cfg.wakeVoice && SR && !st.speaking) { retries = 0; startRec('wake'); }
+}
+function activate(src) {
+  if (st.mode !== 'wake') return;
+  el.wrap.classList.remove('flash'); void el.wrap.offsetWidth; el.wrap.classList.add('flash');
+  startCommand(src === 'clap' ? 'Due clap rilevati.' : 'Attivazione vocale rilevata.');
+}
+function startCommand(msg) {
+  if (st.speaking) cancelSpeech();
+  stopRec(); clearTimeout(cmdT); setMode('listen'); el.heard.textContent = '…';
+  if (SR) { startRec('listen'); note((msg ? msg + ' ' : '') + 'Dimmi pure…'); }
+  else { note((msg || '') + ' Questo browser non ha il riconoscimento vocale: scrivi il comando.'); el.txt.focus(); }
+  cmdT = setTimeout(() => endCommand('Tempo scaduto, nessun comando.'), 10000);
+}
+function endCommand(msg) {
+  clearTimeout(cmdT); stopRec();
+  if (st.mode === 'listen') resumeWake();
+  if (msg) warn(msg);
+}
+
+/* ---------- Attivazione / disattivazione ---------- */
+async function arm() {
+  if (!SR && !hasMic) { setMode('off'); return false; }
+  el.btnMic.disabled = true;
+  if (hasMic && !(await startMic())) { el.btnMic.disabled = false; setMode('off'); return false; }
+  el.btnMic.disabled = false; st.armed = true; resumeWake(); return true;
+}
+function disarm() {
+  st.armed = false; clearTimeout(cmdT); stopRec(); stopMic();
+  if (st.mode !== 'think' && st.mode !== 'speak') setMode('off'); else { setMode(st.mode); }
+}
+
+/* ---------- Sintesi vocale ---------- */
+let voices = [];
+function loadVoices() {
+  if (!hasTTS) return;
+  voices = speechSynthesis.getVoices().filter(v => /^it/i.test(v.lang));
+  const s = $('#sVoice'); s.textContent = '';
+  const add = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; s.appendChild(o); };
+  add('', voices.length ? 'Predefinita (italiano)' : 'Nessuna voce italiana: voce di sistema');
+  voices.forEach(v => add(v.voiceURI, v.name + ' (' + v.lang + ')'));
+  s.value = cfg.voiceURI;
+}
+if (hasTTS) { loadVoices(); speechSynthesis.addEventListener('voiceschanged', loadVoices); }
+
+let speakToken = 0;
+function speak(text) {
+  if (!hasTTS) { warn('Sintesi vocale non supportata: leggi la risposta nella cronologia.'); resumeWake(); return; }
+  speechSynthesis.cancel(); stopRec(); clearTimeout(cmdT);
+  const token = ++speakToken, u = new SpeechSynthesisUtterance(text);
+  u.lang = 'it-IT'; u.rate = +cfg.rate || 1;
+  const v = voices.find(x => x.voiceURI === cfg.voiceURI) || voices[0]; if (v) u.voice = v;
+  const done = () => { if (token !== speakToken) return; st.speaking = false; el.btnStop.disabled = true; setTimeout(() => { if (st.mode === 'speak' || st.mode === 'off' || st.mode === 'wake') resumeWake(); }, 350); };
+  u.onstart = () => { if (token !== speakToken) return; st.speaking = true; setMode('speak'); };
+  u.onboundary = () => { st.pulse = 1; };   // impulso a ogni parola: sincronizzazione approssimata (l'audio TTS non è accessibile)
+  u.onend = done; u.onerror = done;
+  st.speaking = true; setMode('speak');
+  speechSynthesis.speak(u);
+}
+function cancelSpeech() { if (hasTTS) { speakToken++; speechSynthesis.cancel(); } st.speaking = false; el.btnStop.disabled = true; }
+
+/* ---------- Intelligenza: backend opzionale o comandi locali ---------- */
+function endpointURL() {
+  if (!cfg.endpoint) return null;
+  try { const u = new URL(cfg.endpoint, location.href);
+    if (u.protocol === 'https:' || (u.protocol === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(u.hostname))) return u.href; } catch (e) {}
+  return null;
+}
+function updateBackendPill(state) {
+  if (!endpointURL()) pill(el.be, 'off', 'Backend AI non configurato');
+  else if (state === 'ok') pill(el.be, 'ok', 'Backend online');
+  else if (state === 'err') pill(el.be, 'err', 'Backend non raggiungibile');
+  else pill(el.be, 'on', 'Backend configurato (non verificato)');
+}
+function local(t) {
+  const n = norm(t), d = new Date();
+  if (/\b(che ore|l ora|ora e|che ora)\b/.test(n)) return 'Sono le ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) + '.';
+  if (/\b(che giorno|la data|che data|quanti ne abbiamo)\b/.test(n)) return 'Oggi è ' + d.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + '.';
+  if (/\baiuto\b|cosa sai fare/.test(n)) return 'Senza backend AI posso dirti ora e data. Per conversare davvero va configurato un endpoint nelle impostazioni.';
+  return 'Nessun backend AI è configurato, quindi non posso elaborare questa richiesta. Posso solo dire ora e data.';
+}
+async function send(text, via) {
+  text = (text || '').trim(); if (!text) return;
+  if (st.busy) { warn('Sto ancora elaborando la richiesta precedente.'); return; }
+  const n = norm(text);
+  el.heard.textContent = text; addMsg('u', text, via === 'voce' ? 'voce' : '');
+  if (/^(stop|zitto|silenzio|basta)$/.test(n)) { cancelSpeech(); resumeWake(); return; }
+  if (/disattiva (il )?microfono/.test(n) && st.armed) { disarm(); addMsg('s', 'Microfono disattivato.'); return; }
+  st.busy = true; stopRec(); clearTimeout(cmdT); setMode('think'); note('Elaboro la richiesta…');
+  let out, tag = '';
+  const url = endpointURL();
+  if (url) {
+    const ctrl = new AbortController(), to = setTimeout(() => ctrl.abort(), 25000);
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+        body: JSON.stringify({ message: text, history: st.hist.slice(-10), lang: 'it-IT' }) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json(); out = j && (j.reply || j.message || j.text);
+      if (typeof out !== 'string' || !out) throw new Error('risposta non valida');
+      updateBackendPill('ok');
+    } catch (e) { updateBackendPill('err'); tag = 'errore'; out = 'Il backend non ha risposto (' + (e.name === 'AbortError' ? 'timeout' : e.message) + ').'; }
+    clearTimeout(to);
+  } else { out = local(text); tag = 'locale'; }
+  st.hist.push({ role: 'user', content: text }, { role: 'assistant', content: out });
+  st.busy = false;
+  addMsg('j', out, tag); el.said.textContent = out; note('');
+  speak(out);
+}
+
+/* ---------- Nucleo animato (canvas) ---------- */
+const cv = $('#core'), g = cv.getContext('2d');
+let W = 300, hue = 218, en = .16, lvl = 0, rot = 0, sweep = 0, lastT = 0, lastWave = 0, lastMeter = 0, lastHue = -1;
+const waves = [], parts = [];
+for (let i = 0, n = innerWidth < 640 ? 50 : 100; i < n; i++)
+  parts.push({ a: Math.random() * TAU, r: .3 + Math.random() * .8, s: (.15 + Math.random() * .6) * (Math.random() < .5 ? -1 : 1), z: .6 + Math.random() * 1.5, p: Math.random() * TAU });
+function resize() {
+  const r = cv.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, 2);
+  W = r.width || 300; cv.width = cv.height = Math.round(W * d); g.setTransform(d, 0, 0, d, 0, 0);
+}
+const ro = new ResizeObserver(resize); ro.observe(cv);
+
+function draw(t) {
+  requestAnimationFrame(draw);
+  const dt = Math.min(.05, (t - lastT) / 1000 || .016); lastT = t;
+  analyse(t);
+  const m = st.mode, mot = RM ? .25 : 1;
+  let tl = 0;
+  if (m === 'speak') { st.pulse *= Math.pow(.002, dt); tl = .22 + .12 * Math.sin(t / 110) * Math.sin(t / 290) + st.pulse * .55; }
+  else if (m === 'listen' || m === 'wake') tl = st.mic;
+  lvl += (Math.max(0, tl) - lvl) * Math.min(1, dt * 12);
+  en += ((ENERGY[m] + lvl * .8) - en) * Math.min(1, dt * 5);
+  hue += (HUE[m] - hue) * Math.min(1, dt * 4);
+  const hr = Math.round(hue); if (hr !== lastHue) { lastHue = hr; document.documentElement.style.setProperty('--h', hr); }
+
+  const c = W / 2, R = W * .46;
+  const br = R * (1 + (m === 'off' ? .018 : .03) * Math.sin(t / (m === 'off' ? 1200 : 750)) * mot) * (1 + lvl * .07 * mot);
+  const col = (l, a, o = 0) => `hsla(${hue + o},100%,${l}%,${a})`;
+  g.clearRect(0, 0, W, W); g.globalCompositeOperation = 'lighter';
+
+  // bagliore
+  const gr = g.createRadialGradient(c, c, br * .1, c, c, br * 1.05);
+  gr.addColorStop(0, col(55, .12 + .35 * en)); gr.addColorStop(.6, col(50, .06 + .12 * en, 45)); gr.addColorStop(1, col(50, 0));
+  g.fillStyle = gr; g.beginPath(); g.arc(c, c, br * 1.05, 0, TAU); g.fill();
+
+  // anelli rotanti
+  rot += dt * mot * (m === 'think' ? 2.2 : .2 + en * .6);
+  for (let k = 0; k < 4; k++) {
+    const r = br * (.58 + k * .14), dir = k % 2 ? -1 : 1;
+    g.save(); g.translate(c, c); g.rotate(rot * dir * (1 + k * .35));
+    g.setLineDash([r * (.5 + k * .2), r * (.12 + k * .08)]);
+    g.lineWidth = 1.2 + k * .5; g.strokeStyle = col(60, .35 + .4 * en, k * 28);
+    g.beginPath(); g.arc(0, 0, r, 0, TAU); g.stroke(); g.restore();
+  }
+  g.setLineDash([]);
+  if (m === 'think') {   // indicatore di attività: archi che ruotano in senso opposto
+    sweep += dt * 4.5 * mot;
+    for (let k = 0; k < 2; k++) {
+      g.lineWidth = 4; g.lineCap = 'round'; g.strokeStyle = col(70, .85, 50 - k * 90);
+      g.beginPath(); const a0 = k ? -sweep * 1.4 : sweep; g.arc(c, c, br * (.97 - k * .12), a0, a0 + 1.1); g.stroke();
+    }
+  }
+  // onde espansive (ascolto / voce)
+  const iv = m === 'wake' ? 1500 : m === 'listen' ? 750 - lvl * 400 : m === 'speak' ? 520 : 0;
+  if (iv && !RM && t - lastWave > iv) { lastWave = t; waves.push(t); }
+  for (let i = waves.length - 1; i >= 0; i--) {
+    const age = (t - waves[i]) / 1700; if (age >= 1) { waves.splice(i, 1); continue; }
+    g.lineWidth = 2; g.strokeStyle = col(65, (1 - age) * .55, 25);
+    g.beginPath(); g.arc(c, c, br * (.5 + age * .85), 0, TAU); g.stroke();
+  }
+  // anello d'onda reattivo al livello
+  g.lineWidth = 2; g.strokeStyle = col(68, .85, 30); g.beginPath();
+  const amp = .02 + lvl * .55 * mot + (m === 'think' ? .025 : 0);
+  for (let i = 0; i <= 140; i++) {
+    const a = i / 140 * TAU, w = Math.sin(a * 5 + t / 300) * Math.sin(a * 3 - t / 520), rr = br * .5 * (1 + amp * w);
+    const x = c + Math.cos(a) * rr, y = c + Math.sin(a) * rr; i ? g.lineTo(x, y) : g.moveTo(x, y);
+  }
+  g.stroke();
+  // particelle
+  for (const p of parts) {
+    p.a += p.s * dt * (.15 + en * 1.3) * mot;
+    const rr = br * p.r * (1 + lvl * .14 * Math.sin(t / 200 + p.p) * mot);
+    g.fillStyle = col(p.z > 1.6 ? 85 : 68, .25 + .55 * (.5 + .5 * Math.sin(t / 600 + p.p)), p.z > 1.4 ? 70 : 0);
+    g.beginPath(); g.arc(c + Math.cos(p.a) * rr, c + Math.sin(p.a) * rr, p.z * (1 + lvl * 1.4), 0, TAU); g.fill();
+  }
+  g.globalCompositeOperation = 'source-over';
+
+  // logo e indicatore volume
+  el.logo.style.transform = `translate(-50%,-50%) scale(${(1 + lvl * .16 * mot + (RM ? 0 : .02 * Math.sin(t / 900))).toFixed(3)})`;
+  el.logo.style.filter = `brightness(${(1 + en * .5).toFixed(2)})`;
+  el.mbar.style.transform = `scaleX(${Math.min(1, st.mic).toFixed(3)})`;
+  if (t - lastMeter > 250) { lastMeter = t; el.meter.setAttribute('aria-valuenow', Math.round(st.mic * 100)); }
+}
+
+/* ---------- Eventi UI ---------- */
+el.btnMic.addEventListener('click', () => { if (st.armed) { disarm(); addMsg('s', 'Microfono disattivato.'); } else arm(); });
+el.btnTalk.addEventListener('click', async () => {
+  if (!SR) { warn('Riconoscimento vocale non supportato da questo browser: scrivi il comando.'); el.txt.focus(); return; }
+  if (st.mode === 'listen') { endCommand('Ascolto annullato.'); return; }
+  if (!st.armed && !(await arm())) return;
+  startCommand('');
+});
+el.btnStop.addEventListener('click', () => { cancelSpeech(); setTimeout(resumeWake, 200); });
+$('#form').addEventListener('submit', e => { e.preventDefault(); const v = el.txt.value; el.txt.value = ''; if (st.mode === 'listen') endCommand(); send(v, 'testo'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && st.speaking && !$('#dlg').open) { cancelSpeech(); setTimeout(resumeWake, 200); } });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && st.armed && st.mode === 'wake' && !rec && cfg.wakeVoice && SR) { retries = 0; startRec('wake'); }
+  if (!document.hidden && actx && actx.state === 'suspended') actx.resume().catch(() => {});
+});
+window.addEventListener('pagehide', () => { cancelSpeech(); stopRec(); stopMic(); });
+
+/* Impostazioni */
+const dlg = $('#dlg');
+function syncSettings() {
+  $('#cVoice').checked = !!cfg.wakeVoice && !!SR; $('#cVoice').disabled = !SR;
+  $('#cClap').checked = !!cfg.wakeClap && hasMic; $('#cClap').disabled = !hasMic;
+  $('#rSens').value = cfg.sens; $('#oSens').textContent = cfg.sens;
+  $('#rRate').value = cfg.rate; $('#oRate').textContent = (+cfg.rate).toFixed(2) + '×';
+  $('#iEnd').value = cfg.endpoint; $('#sVoice').disabled = !hasTTS;
+  $('#sup').textContent = 'Supporto del browser — Riconoscimento vocale: ' + (SR ? 'sì' : 'no') + ' · Microfono/Web Audio (clap): ' + (hasMic ? 'sì' : 'no') + ' · Sintesi vocale: ' + (hasTTS ? 'sì' : 'no') +
+    '. Il riconoscimento vocale può dipendere da un servizio online del browser e non funziona a pagina chiusa o sospesa.';
+}
+function applyCfg() { saveCfg(); updateBackendPill(); if (st.armed && st.mode === 'wake') resumeWake(); }
+$('#btnSet').addEventListener('click', () => { syncSettings(); if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', ''); });
+$('#cVoice').addEventListener('change', e => { cfg.wakeVoice = e.target.checked; applyCfg(); });
+$('#cClap').addEventListener('change', e => { cfg.wakeClap = e.target.checked; applyCfg(); });
+$('#rSens').addEventListener('input', e => { cfg.sens = +e.target.value; $('#oSens').textContent = cfg.sens; saveCfg(); });
+$('#rRate').addEventListener('input', e => { cfg.rate = +e.target.value; $('#oRate').textContent = cfg.rate.toFixed(2) + '×'; saveCfg(); });
+$('#sVoice').addEventListener('change', e => { cfg.voiceURI = e.target.value; saveCfg(); });
+$('#iEnd').addEventListener('change', e => {
+  const v = e.target.value.trim(); cfg.endpoint = v;
+  if (v && !(function () { cfg.endpoint = v; return endpointURL(); })()) { cfg.endpoint = ''; e.target.value = ''; warn('Endpoint non valido: serve un URL HTTPS.'); }
+  applyCfg();
+});
+
+/* ---------- Avvio ---------- */
+updateBackendPill(); setMode('off'); requestAnimationFrame(draw);
+if (!SR && !hasMic) { el.btnMic.disabled = true; el.btnTalk.disabled = true; }
+})();
+</script>
+</body>
+</html>
